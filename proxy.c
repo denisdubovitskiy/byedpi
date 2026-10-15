@@ -44,9 +44,31 @@
 
 int server_fd;
 
+#ifndef _WIN32
+/* Самопайп для пробуждения event loop от сигнала: shutdown() на слушающий
+ * сокет не будит poll() в macOS/BSD. write() в обработчике — async-signal-safe */
+static int sig_pipe[2] = { -1, -1 };
+#endif
+
 static void on_cancel(int sig) {
+    #ifndef _WIN32
+    if (sig_pipe[1] >= 0) {
+        char c = 1;
+        ssize_t r = write(sig_pipe[1], &c, 1);
+        (void)r;
+    }
+    #endif
     shutdown(server_fd, SHUT_RDWR);
 }
+
+#ifndef _WIN32
+static int on_cancel_evt(struct poolhd *pool, struct eval *val, int et) {
+    (void)val;
+    (void)et;
+    pool->brk = 1;
+    return 0;
+}
+#endif
 
 void dump_all_cache(void);
 
@@ -1026,6 +1048,13 @@ int start_event_loop(int srvfd)
         close(srvfd);
         return -1;
     }
+    #ifndef _WIN32
+    if (!add_event(pool, &on_cancel_evt, sig_pipe[0], POLLIN)) {
+        destroy_pool(pool);
+        close(srvfd);
+        return -1;
+    }
+    #endif
     loop_event(pool);
     
     LOG(LOG_S, "exit\n");
@@ -1068,6 +1097,14 @@ int run(const union sockaddr_u *srv)
     if (signal(SIGPIPE, SIG_IGN) == SIG_ERR)
         uniperror("signal SIGPIPE!");
     #endif
+    #ifndef _WIN32
+    if (pipe(sig_pipe) < 0) {
+        uniperror("pipe");
+        return -1;
+    }
+    fcntl(sig_pipe[0], F_SETFL, O_NONBLOCK);
+    fcntl(sig_pipe[1], F_SETFL, O_NONBLOCK);
+    #endif
     signal(SIGINT, on_cancel);
     signal(SIGTERM, on_cancel);
     #ifdef SIGHUP
@@ -1076,7 +1113,16 @@ int run(const union sockaddr_u *srv)
     
     int fd = listen_socket(srv);
     if (fd < 0) {
+        #ifndef _WIN32
+        close(sig_pipe[0]);
+        close(sig_pipe[1]);
+        #endif
         return -1;
     }
-    return start_event_loop(fd);
+    int ret = start_event_loop(fd);
+    #ifndef _WIN32
+    close(sig_pipe[0]);
+    close(sig_pipe[1]);
+    #endif
+    return ret;
 }

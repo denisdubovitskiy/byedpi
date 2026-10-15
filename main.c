@@ -102,14 +102,14 @@ static const char help_text[] = {
     "    -d, --disorder <pos_t>    Split and send reverse order\n"
     "    -o, --oob <pos_t>         Split and send as OOB data\n"
     "    -q, --disoob <pos_t>      Split and send reverse order as OOB data\n"
-    #ifdef FAKE_SUPPORT
     "    -f, --fake <pos_t>        Split and send fake packet\n"
+    #ifdef FAKE_SUPPORT
     #ifdef __linux__
     "    -S, --md5sig              Add MD5 Signature option for fake packets\n"
     #endif
+    #endif
     "    -n, --fake-sni <str>      Change SNI in fake\n"
     "                              Replaced: ? - rand let, # - rand num, * - rand let/num\n"
-    #endif
     "    -t, --ttl <num>           TTL of fake packets, default 8\n"
     "    -O, --fake-offset <pos_t> Fake data start offset\n"
     "    -l, --fake-data <f|:str>  Set custom fake packet\n"
@@ -164,13 +164,13 @@ const struct option options[] = {
     {"disorder",      1, 0, 'd'},
     {"oob",           1, 0, 'o'},
     {"disoob",        1, 0, 'q'},
-    #ifdef FAKE_SUPPORT
     {"fake",          1, 0, 'f'},
+    #ifdef FAKE_SUPPORT
     #ifdef __linux__
     {"md5sig",        0, 0, 'S'},
     #endif
-    {"fake-sni",      1, 0, 'n'},
     #endif
+    {"fake-sni",      1, 0, 'n'},
     {"ttl",           1, 0, 't'},
     {"fake-data",     1, 0, 'l'},
     {"fake-offset",   1, 0, 'O'},
@@ -615,6 +615,36 @@ static struct desync_params *add_group(struct desync_params *prev)
 
 
 #ifdef DAEMON
+/* Портативная замена deprecated daemon(0, 0):
+ * двойной fork, setsid, смена каталога и редирект stdio на /dev/null */
+static int daemonize(void)
+{
+    if (fork() > 0) {
+        _exit(0);
+    }
+    if (setsid() < 0) {
+        return -1;
+    }
+    if (fork() > 0) {
+        _exit(0);
+    }
+    if (chdir("/") < 0) {
+        return -1;
+    }
+    int fd = open("/dev/null", O_RDWR);
+    if (fd < 0) {
+        return -1;
+    }
+    dup2(fd, STDIN_FILENO);
+    dup2(fd, STDOUT_FILENO);
+    dup2(fd, STDERR_FILENO);
+    if (fd > STDERR_FILENO) {
+        close(fd);
+    }
+    return 0;
+}
+
+
 int init_pid_file(const char *fname)
 {
     int pid_fd = open(fname, O_RDWR | O_CREAT, 0640);
@@ -732,6 +762,12 @@ int parse_args(int argc, char **argv)
     
     while (!invalid && (rez = getopt_long(
              argc, argv, opt, options, 0)) != -1) {
+        #ifndef FAKE_SUPPORT
+        if (rez == 'f' || rez == 'n' || rez == 'l' || rez == 'O' || rez == 'Q') {
+            fprintf(stderr, "ciadpi: fake options are not supported on this platform\n");
+            return -1;
+        }
+        #endif
         switch (rez) {
         
         case 'N':
@@ -1318,7 +1354,7 @@ int init(void)
     srand((unsigned int)time(0));
     
     #ifdef DAEMON
-    if (params.daemonize && daemon(0, 0) < 0) {
+    if (params.daemonize && daemonize() < 0) {
         return -1;
     }
     if (params.pid_file 

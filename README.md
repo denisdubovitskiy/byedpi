@@ -331,10 +331,54 @@ TCP может отсылать данные вне основного пото�
 ------
 ### Сборка
 Для сборки понадобится: 
-`make`, `gcc/clang` для Linux, `mingw` для Windows  
+`make`, `gcc/clang` для Linux/macOS, `mingw` для Windows  
 
 * Linux: `make`
+* macOS: `make` (нужен Xcode Command Line Tools: `xcode-select --install`)
 * Windows: `make windows CC=x86_64-w64-mingw32-gcc`
+
+------
+### macOS
+
+Проксируется всё, кроме прозрачного режима: обычный SOCKS5 (TCP и UDP ASSOCIATE),
+IPv6, режим демона.
+
+Быстрый старт (без root):
+
+```sh
+make
+./dist/macos/install.sh           # LaunchAgent с пресетом --disorder 1 --auto=torst --tlsrec 1+s
+./dist/macos/socks.sh on          # включить системный SOCKS-прокси 127.0.0.1:1080
+```
+
+* Опции сервиса задаются аргументами: `./dist/macos/install.sh --split 2 --auto=torst --disorder 1`
+* `./dist/macos/socks.sh off` — выключить системный прокси; `status` — показать состояние
+* `./dist/macos/uninstall.sh` — снять сервис (`--purge` — также удалить бинарь)
+* Логи сервиса: `~/Library/Logs/ciadpi.log`
+
+Ограничения macOS: `--fake` и `--fake-*` недоступны (механика требует zero-copy
+очереди сокета — `splice`/`sendfile(SF_NOCACHE)`, что невозможно в user-space XNU;
+опции отклоняются с ясным сообщением). Также не поддерживаются `--transparent`,
+`--drop-sack`, `--protect-path`, `-T`. Для обхода доступны `--split`, `--disorder`,
+`--tlsrec`, `--oob`, `--ttl`, `--auto` с кешем. Примечание: `--oob` работает на
+youtube/instagram/x, но с Cloudflare-хостами (например example.com) соединение
+может зависать — их стек некорректно переносит urgent-байт в поток.
+
+### CI локально (act)
+
+CI-матрицу можно прогнать до push — через [act](https://github.com/nektos/act)
+(`brew install act`):
+
+```sh
+make ci          # все три джобы
+make ci-macos    # только macOS — выполняется прямо на хосте, быстро
+make ci-linux    # только linux — первый прогон скачает образ catthehacker/ubuntu:act-latest (~1.5 ГБ)
+make ci-windows  # только windows/mingw
+```
+
+Маппинг раннеров в `.actrc`: `macos-latest` → self-hosted (сборка на реальной
+macOS), `ubuntu-latest` → контейнер. Нюанс: act не читает `docker context`
+(Docker Desktop / Lima) — Makefile сам прокидывает `DOCKER_HOST`.
 
 ------
 ### Docker образ

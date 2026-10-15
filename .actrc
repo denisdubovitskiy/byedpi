@@ -1,0 +1,14 @@
+# Локальный запуск GitHub Actions через act (https://github.com/nektos/act)
+#
+# act не умеет контейнеры с macOS — джоба macos-latest выполняется
+# прямо на хосте (self-hosted). Требуется make на хосте.
+-P macos-latest=-self-hosted
+
+# Ubuntu-образ act с предустановленным тулчейном (gcc, make, python3, sudo).
+# Первый pull ~1.5 ГБ, дальше кэшируется Docker.
+-P ubuntu-latest=catthehacker/ubuntu:act-latest
+
+# Не монтировать docker.sock в контейнеры: при Lima/VD socket-путь хоста
+# недоступен внутри VM (mkdir: operation not supported), а docker в наших
+# джобах не нужен.
+--container-daemon-socket=-
